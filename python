@@ -1,0 +1,324 @@
+import streamlit as st
+import MetaTrader5 as mt5
+import time
+import json
+import os
+
+# ---------- Admin folder helpers ----------
+ADMIN_DIR = "admin"
+USERS_FILE = os.path.join(ADMIN_DIR, "users.json")
+ORB_MASTER_FILE = os.path.join(ADMIN_DIR, "orb_time_ranges.json")
+CREDENTIALS_FILE = os.path.join(ADMIN_DIR, "credentials.json")
+TELEGRAM_FILE = os.path.join(ADMIN_DIR, "telegram_channels.json")
+GLOBAL_SETTINGS_FILE = os.path.join(ADMIN_DIR, "global_settings.json")
+
+def load_json_file(path, default):
+    if os.path.exists(path):
+        with open(path, "r") as f:
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                return default
+    return default
+
+def save_json_file(path, data):
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+
+os.makedirs(ADMIN_DIR, exist_ok=True)
+
+# Ensure admin files exist (only MADMAX47 allowed!)
+if not os.path.exists(USERS_FILE):
+    save_json_file(USERS_FILE, ["MADMAX47"])
+if not os.path.exists(ORB_MASTER_FILE):
+    save_json_file(ORB_MASTER_FILE, [
+        "09:15-09:30", "09:30-09:45", "09:45-10:00",
+        "10:00-10:15", "10:15-10:30", "10:30-10:45"
+    ])
+if not os.path.exists(CREDENTIALS_FILE):
+    save_json_file(CREDENTIALS_FILE, {"id": "", "server": "", "password": ""})
+if not os.path.exists(TELEGRAM_FILE):
+    save_json_file(TELEGRAM_FILE, {})
+if not os.path.exists(GLOBAL_SETTINGS_FILE):
+    save_json_file(GLOBAL_SETTINGS_FILE, {
+        "Default Risk (%)": 1.0,
+        "Trading Mode": "Demo"
+    })
+
+# --- Username Login (session secured) ---
+all_users = load_json_file(USERS_FILE, [])
+if "logged_in_user" not in st.session_state:
+    st.session_state["logged_in_user"] = None
+
+if st.session_state["logged_in_user"] is None:
+    st.title("Trading Assistant Login")
+    username = st.text_input("Enter your username", "")
+    if st.button("Login"):
+        # Case-insensitive matching
+        if username and username.lower() in [u.lower() for u in all_users]:
+            st.session_state["logged_in_user"] = username
+            st.rerun()
+        else:
+            st.error("Invalid username. Please contact admin to be added.")
+    st.stop()
+else:
+    username = st.session_state["logged_in_user"]
+
+# --- Load admin data
+master_orb_ranges = load_json_file(ORB_MASTER_FILE, [])
+credentials = load_json_file(CREDENTIALS_FILE, {"id": "", "server": "", "password": ""})
+telegram_data = load_json_file(TELEGRAM_FILE, {})
+global_settings = load_json_file(GLOBAL_SETTINGS_FILE, {
+    "Default Risk (%)": 1.0,
+    "Trading Mode": "Demo"
+})
+
+# --- Persistent session state (single user)
+if 'mt5_logged_in' not in st.session_state:
+    st.session_state['mt5_logged_in'] = False
+if 'mt5_login_input' not in st.session_state:
+    st.session_state['mt5_login_input'] = credentials.get("id", "")
+if 'mt5_password' not in st.session_state:
+    st.session_state['mt5_password'] = credentials.get("password", "")
+if 'mt5_server' not in st.session_state:
+    st.session_state['mt5_server'] = credentials.get("server", "")
+if 'telegram_settings' not in st.session_state:
+    st.session_state['telegram_settings'] = telegram_data
+if 'global_settings' not in st.session_state:
+    st.session_state['global_settings'] = global_settings
+if 'orb_ranges' not in st.session_state:
+    st.session_state['orb_ranges'] = master_orb_ranges
+
+# ---------- TOP ROW: STRATEGY, TIMEFRAME, LOGIN ----------
+st.title("Trading Assistant Dashboard")
+st.markdown(f"**Logged in as:** `{username}`")
+
+col1, col2, col3 = st.columns([1, 1, 1])
+
+with col1:
+    st.header("Strategy")
+    strategies = [
+        "Mean Reversion", "Range Breakout", "Trend Following", "MSS+BOS",
+        "BREAK & RETEST", "EMA CROSS", "ORB"
+    ]
+    strategy = st.selectbox("Select Strategy:", strategies, key="strategy")
+
+with col2:
+    st.header("Time Frames")
+    if strategy == "ORB":
+        selected_orb_ranges = st.multiselect(
+            "Select ORB Time Ranges:",
+            st.session_state['orb_ranges'],
+            default=st.session_state['orb_ranges']
+        )
+        st.caption("ORB time ranges are managed in Global Settings.")
+    else:
+        timeframe_options = [
+            "M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"
+        ]
+        selected_timeframes = st.multiselect("Select Time frames:", timeframe_options)
+
+with col3:
+    st.header("MT5 Login")
+    mt5_login_input = st.text_input(
+        "Login", value=st.session_state['mt5_login_input'], key="login"
+    )
+    mt5_password = st.text_input(
+        "Password", type="password", value=st.session_state['mt5_password'], key="password"
+    )
+    mt5_server = st.text_input(
+        "Server", value=st.session_state['mt5_server'], key="server"
+    )
+    login_btn = st.button("Login", key="login_btn")
+
+    if login_btn:
+        if not mt5_login_input or not mt5_login_input.isdigit():
+            st.error("Please enter a valid numeric MT5 Login ID.")
+        elif not mt5_password:
+            st.error("Please enter your MT5 Password.")
+        elif not mt5_server:
+            st.error("Please enter your MT5 Server.")
+        else:
+            with st.spinner("Logging in..."):
+                try:
+                    login_int = int(mt5_login_input)
+                except Exception:
+                    st.error("Login ID must be a number.")
+                    st.stop()
+                if not mt5.initialize(server=mt5_server, login=login_int, password=mt5_password):
+                    st.error(f"Login failed: {mt5.last_error()}")
+                    st.session_state['mt5_logged_in'] = False
+                else:
+                    account_info = mt5.account_info()
+                    if account_info is None:
+                        st.error(f"Login failed: {mt5.last_error()}")
+                        st.session_state['mt5_logged_in'] = False
+                    else:
+                        st.success("Login successful!")
+                        st.session_state['mt5_logged_in'] = True
+                        st.session_state['account_info'] = account_info
+                        # Save credentials
+                        new_creds = {
+                            "id": mt5_login_input,
+                            "password": mt5_password,
+                            "server": mt5_server
+                        }
+                        save_json_file(CREDENTIALS_FILE, new_creds)
+                        st.session_state['mt5_login_input'] = mt5_login_input
+                        st.session_state['mt5_password'] = mt5_password
+                        st.session_state['mt5_server'] = mt5_server
+                        st.write(f"Account: {account_info.login}")
+
+# --- Show saved MT5 login ID after successful login ---
+if os.path.exists(CREDENTIALS_FILE):
+    last_creds = load_json_file(CREDENTIALS_FILE, {})
+    if last_creds.get("id"):
+        st.info(f"MT5 Login ID: {last_creds.get('id')}")
+
+st.divider()
+
+# ----------- GLOBAL SETTINGS (Everything editable!) -----------
+with st.expander("Global Settings", expanded=False):
+
+    st.markdown("#### Edit Global Settings (affects entire dashboard)")
+
+    # 1. Edit global parameters
+    with st.form("global_settings_form"):
+        risk = st.number_input(
+            "Default Risk (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=float(st.session_state['global_settings'].get("Default Risk (%)", 1.0)),
+            step=0.1
+        )
+        trading_mode = st.selectbox(
+            "Trading Mode", ["Demo", "Live"],
+            index=0 if st.session_state['global_settings'].get("Trading Mode", "Demo") == "Demo" else 1
+        )
+        save_gs = st.form_submit_button("Save General Settings")
+        if save_gs:
+            st.session_state['global_settings'] = {
+                "Default Risk (%)": risk,
+                "Trading Mode": trading_mode
+            }
+            save_json_file(GLOBAL_SETTINGS_FILE, st.session_state['global_settings'])
+            st.success("General settings saved!")
+
+    st.divider()
+
+    # 2. Edit ORB time ranges
+    st.markdown("#### Edit ORB Time Ranges")
+    orb_ranges = st.session_state['orb_ranges']
+    new_orb = st.text_input("Add new ORB time range (e.g. 10:45-11:00)", key="new_orb")
+    if st.button("Add ORB Time Range", key="add_orb"):
+        if new_orb and new_orb not in orb_ranges:
+            orb_ranges.append(new_orb)
+            save_json_file(ORB_MASTER_FILE, orb_ranges)
+            st.session_state['orb_ranges'] = orb_ranges
+            st.success(f"Added {new_orb}")
+
+    for i, orb in enumerate(list(orb_ranges)):
+        col_orb, col_del = st.columns([5,1])
+        col_orb.write(orb)
+        if col_del.button("Delete", key=f"del_orb_{i}"):
+            orb_ranges.remove(orb)
+            save_json_file(ORB_MASTER_FILE, orb_ranges)
+            st.session_state['orb_ranges'] = orb_ranges
+            st.rerun()
+
+    st.divider()
+
+    # 3. Edit Telegram channels per strategy
+    st.markdown("#### Edit Telegram Channels for Strategies")
+    tg_strat = st.selectbox("Choose strategy for Telegram:", strategies, key="tg_strat")
+    telegram_data = load_json_file(TELEGRAM_FILE, {})
+    tg_token = telegram_data.get(tg_strat, {}).get("token", "")
+    tg_chan = telegram_data.get(tg_strat, {}).get("channel", "")
+    with st.form("telegram_admin_save"):
+        new_token = st.text_input("Telegram Bot Token", value=tg_token, type="password", key="tg_token")
+        new_channel = st.text_input("Telegram Channel ID", value=tg_chan, key="tg_chan")
+        tg_save = st.form_submit_button("Save Telegram Config")
+        if tg_save:
+            telegram_data[tg_strat] = {"token": new_token, "channel": new_channel}
+            save_json_file(TELEGRAM_FILE, telegram_data)
+            st.session_state['telegram_settings'] = telegram_data
+            st.success(f"Telegram config for {tg_strat} saved.")
+
+    st.divider()
+
+    # 4. Edit MT5 credentials
+    st.markdown("#### Edit MT5 Credentials")
+    creds = load_json_file(CREDENTIALS_FILE, {})
+    with st.form("mt5_creds_admin_form"):
+        edit_id = st.text_input("MT5 Login ID", value=creds.get("id", ""), key="edit_id")
+        edit_pw = st.text_input("Password", value=creds.get("password", ""), type="password", key="edit_pw")
+        edit_srv = st.text_input("Server", value=creds.get("server", ""), key="edit_srv")
+        creds_save = st.form_submit_button("Save MT5 Credentials")
+        if creds_save:
+            save_json_file(CREDENTIALS_FILE, {"id": edit_id, "password": edit_pw, "server": edit_srv})
+            st.session_state['mt5_login_input'] = edit_id
+            st.session_state['mt5_password'] = edit_pw
+            st.session_state['mt5_server'] = edit_srv
+            st.success("MT5 credentials updated!")
+
+    st.info("""
+    All admin data (ORB ranges, Telegram config, MT5 credentials, and global parameters) can be edited here.
+    No need to edit files in the admin folder directly.
+    """)
+
+st.divider()
+
+# ----------- LIVE PRICE WATCHLIST -----------
+st.header("Live Price Watchlist")
+
+watchlist_symbols = [
+    "EURUSD.", "GBPUSD.", "USDJPY.", "AUDUSD.", "USDCHF.", "USDCAD.", "NZDUSD.", "XAUUSD."
+]
+
+watchlist_refresh_rate = st.slider("Watchlist refresh rate (seconds)", 1, 30, 2, key="watchlist_refresh")
+run_watchlist = st.checkbox("Enable Live Watchlist", value=True, key="enable_watchlist")
+
+import time as pytime
+
+if run_watchlist:
+    prices = []
+    for symbol in watchlist_symbols:
+        tick = mt5.symbol_info_tick(symbol)
+        price = None
+        if tick is not None and tick.last != 0:
+            price = tick.last
+        elif tick is not None and tick.bid != 0:
+            price = tick.bid
+        else:
+            price = "N/A"
+        prices.append({"Symbol": symbol, "Price": price})
+    st.table(prices)
+    pytime.sleep(watchlist_refresh_rate)
+    st.rerun()
+else:
+    st.info("Turn ON to monitor live prices for your watchlist.")
+
+st.divider()
+
+# ---------- BELOW: LIVE MONITOR ----------
+st.header("Live Open Positions Monitor")
+if st.session_state.get('mt5_logged_in'):
+    placeholder = st.empty()
+    run_monitor = st.checkbox("Live Monitor ON", value=True)
+    refresh_rate = st.slider("Refresh rate (seconds):", 1, 30, 5)
+    while run_monitor:
+        with placeholder.container():
+            positions = mt5.positions_get()
+            if positions:
+                st.dataframe([p._asdict() for p in positions])
+            else:
+                st.info("No open positions.")
+        time.sleep(refresh_rate)
+        run_monitor = st.session_state.get('Live Monitor ON', True)
+else:
+    st.warning("Please login to MT5 first.")
+
+# ---------- Shutdown ----------
+if st.button("Shutdown MT5"):
+    mt5.shutdown()
+    st.info("MT5 disconnected.")
