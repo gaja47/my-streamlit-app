@@ -84,6 +84,7 @@ export default function Profile() {
           <Row href="/onboarding" label={profile ? "Physique profile" : "Set up profile"} note={profileNote} />
           <Row href="/programs" label="Workout programs" note={selectedProgramId ? `Following: ${selectedProgramId}` : "Browse programs (PPL, 5/3/1, full body, upper/lower)"} />
           <Row href="/exercises" label="Exercise library" note="30+ exercises with form cues" />
+          <Row href="/recipes" label="Recipes" note={account ? `Filtered for ${account.diet} (${account.country})` : "Browse all recipes"} />
           <Row href="/plans" label="Meal plans" note={selectedPlanId ? `Following: ${selectedPlanId}` : "Cut, recomp, lean bulk, mass gain"} />
           <Row href="/reminders" label="Reminders" note={`${onReminders} of ${reminders.length} on`} />
         </div>

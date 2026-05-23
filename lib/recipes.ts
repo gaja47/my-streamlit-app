@@ -9,6 +9,8 @@ export type Ingredient = {
 
 export type Micro = { name: string; pct: number };
 
+import type { DietId } from "./regions";
+
 export type Recipe = {
   id: string;
   meal: string;
@@ -27,6 +29,9 @@ export type Recipe = {
   micros: Micro[];
   ingredients: Ingredient[];
   method: string[];
+  diet?: DietId;
+  cuisine?: string;
+  regions?: string[]; // ISO codes or "*" for global
 };
 
 export const recipes: Record<string, Recipe> = {
@@ -104,6 +109,9 @@ export const recipes: Record<string, Recipe> = {
 
   lunch: {
     id: "lunch",
+    diet: "omnivore",
+    cuisine: "tex-mex",
+    regions: ["*"],
     meal: "Lunch",
     time: "13:30",
     title: "Chicken Rice Bowl",
@@ -143,6 +151,9 @@ export const recipes: Record<string, Recipe> = {
 
   preworkout: {
     id: "preworkout",
+    diet: "vegan",
+    cuisine: "global",
+    regions: ["*"],
     meal: "Pre-workout",
     time: "16:30",
     title: "Banana & Black Coffee",
@@ -248,6 +259,9 @@ export const recipes: Record<string, Recipe> = {
 
 recipes.eggs_oats = {
   id: "eggs_oats",
+  diet: "eggetarian",
+  cuisine: "global",
+  regions: ["*"],
   meal: "Breakfast",
   time: "07:30",
   title: "Eggs & Oatmeal",
@@ -284,6 +298,9 @@ recipes.eggs_oats = {
 
 recipes.tuna_wrap = {
   id: "tuna_wrap",
+  diet: "pescatarian",
+  cuisine: "global",
+  regions: ["*"],
   meal: "Lunch",
   time: "13:30",
   title: "Tuna & Greens Wrap",
@@ -321,6 +338,9 @@ recipes.tuna_wrap = {
 
 recipes.salmon_sweet_potato = {
   id: "salmon_sweet_potato",
+  diet: "pescatarian",
+  cuisine: "global",
+  regions: ["*"],
   meal: "Dinner",
   time: "21:00",
   title: "Salmon & Sweet Potato",
@@ -359,6 +379,9 @@ recipes.salmon_sweet_potato = {
 
 recipes.cottage_pancakes = {
   id: "cottage_pancakes",
+  diet: "eggetarian",
+  cuisine: "global",
+  regions: ["*"],
   meal: "Snack",
   time: "10:30",
   title: "Cottage Cheese Pancakes",
@@ -394,6 +417,9 @@ recipes.cottage_pancakes = {
 
 recipes.chicken_pasta = {
   id: "chicken_pasta",
+  diet: "omnivore",
+  cuisine: "italian",
+  regions: ["*"],
   meal: "Dinner",
   time: "21:00",
   title: "Chicken & Tomato Pasta",
@@ -464,8 +490,248 @@ recipes.smoothie_bowl = {
   ],
 };
 
+// Indian-cuisine additions
+recipes.dal_rice = {
+  id: "dal_rice",
+  diet: "vegan",
+  cuisine: "indian",
+  regions: ["IN", "PK", "BD", "LK", "*"],
+  meal: "Lunch",
+  time: "13:30",
+  title: "Dal Tadka with Steamed Rice",
+  prepMin: 10,
+  cookMin: 25,
+  servings: 1,
+  kcal: 580,
+  protein: 22,
+  carbs: 95,
+  fat: 12,
+  fiber: 12,
+  sugar: 5,
+  sodium: 480,
+  micros: [
+    { name: "Iron", pct: 30 },
+    { name: "Folate", pct: 60 },
+    { name: "Mg", pct: 30 },
+    { name: "Fiber", pct: 50 },
+  ],
+  ingredients: [
+    { name: "Toor / yellow split dal", qty: "80 g dry", p: 20, c: 50, f: 1, k: 280 },
+    { name: "Basmati rice, cooked", qty: "180 g", p: 4, c: 40, f: 0, k: 220 },
+    { name: "Onion, tomato, ginger, garlic", qty: "100 g", p: 2, c: 8, f: 0, k: 40 },
+    { name: "Ghee or oil (tadka)", qty: "10 g", p: 0, c: 0, f: 10, k: 90 },
+    { name: "Cumin, mustard, turmeric, salt", qty: "to taste", p: 0, c: 0, f: 0, k: 0 },
+  ],
+  method: [
+    "Rinse dal and pressure-cook with 3 cups water and turmeric for 3-4 whistles (about 12 min).",
+    "Heat ghee in a small pan; add cumin and mustard seeds until they crackle.",
+    "Saute ginger-garlic, onion, then tomato until soft; season with salt.",
+    "Pour tadka over cooked dal; simmer 2-3 minutes.",
+    "Serve over warm basmati rice with a lemon wedge.",
+  ],
+};
+
+recipes.idli_sambar = {
+  id: "idli_sambar",
+  diet: "vegan",
+  cuisine: "south_indian",
+  regions: ["IN", "LK", "SG"],
+  meal: "Breakfast",
+  time: "07:30",
+  title: "Idli with Sambar",
+  prepMin: 0,
+  cookMin: 15,
+  servings: 1,
+  kcal: 420,
+  protein: 14,
+  carbs: 78,
+  fat: 6,
+  fiber: 9,
+  sugar: 6,
+  sodium: 620,
+  micros: [
+    { name: "Iron", pct: 22 },
+    { name: "Folate", pct: 40 },
+    { name: "Mg", pct: 24 },
+  ],
+  ingredients: [
+    { name: "Idli (rice + urad dal cake)", qty: "4 medium", p: 8, c: 60, f: 1, k: 280 },
+    { name: "Sambar (lentil-vegetable stew)", qty: "200 ml", p: 6, c: 18, f: 5, k: 140 },
+    { name: "Coconut chutney", qty: "20 g", p: 1, c: 2, f: 4, k: 50 },
+  ],
+  method: [
+    "Steam pre-made idli batter in greased idli moulds for 10-12 minutes until a toothpick comes out clean.",
+    "Reheat sambar; thin with a splash of water if needed.",
+    "Plate 4 hot idlis with a ladle of sambar poured over and chutney on the side.",
+  ],
+};
+
+recipes.chicken_curry_roti = {
+  id: "chicken_curry_roti",
+  diet: "omnivore",
+  cuisine: "indian",
+  regions: ["IN", "PK", "BD", "LK", "*"],
+  meal: "Dinner",
+  time: "20:30",
+  title: "Chicken Curry & Roti",
+  prepMin: 15,
+  cookMin: 25,
+  servings: 1,
+  kcal: 720,
+  protein: 56,
+  carbs: 65,
+  fat: 24,
+  fiber: 8,
+  sugar: 6,
+  sodium: 720,
+  micros: [
+    { name: "Iron", pct: 32 },
+    { name: "B12", pct: 60 },
+    { name: "Zn", pct: 38 },
+  ],
+  ingredients: [
+    { name: "Chicken breast, cubed", qty: "180 g", p: 56, c: 0, f: 6, k: 297 },
+    { name: "Whole-wheat roti", qty: "3 medium", p: 9, c: 45, f: 6, k: 280 },
+    { name: "Onion, tomato, ginger-garlic", qty: "120 g", p: 2, c: 10, f: 0, k: 50 },
+    { name: "Yogurt", qty: "30 g", p: 1, c: 1, f: 1, k: 20 },
+    { name: "Oil + masala (garam, turmeric, coriander)", qty: "10 g + spices", p: 0, c: 1, f: 10, k: 95 },
+  ],
+  method: [
+    "Marinate chicken with yogurt, ginger-garlic paste, salt, turmeric, garam masala for 15 min.",
+    "Heat oil; saute onion until golden, add tomatoes, cook to a thick masala.",
+    "Add chicken and marinade; saute 5 min, then add 1/2 cup water and simmer 12-15 min covered.",
+    "Roll dough into 3 thin rotis; cook on a hot tawa, flipping until they puff.",
+    "Serve curry hot with rotis on the side; garnish with fresh cilantro.",
+  ],
+};
+
+recipes.paneer_bhurji_paratha = {
+  id: "paneer_bhurji_paratha",
+  diet: "vegetarian",
+  cuisine: "indian",
+  regions: ["IN", "PK", "*"],
+  meal: "Lunch",
+  time: "13:30",
+  title: "Paneer Bhurji & Paratha",
+  prepMin: 8,
+  cookMin: 15,
+  servings: 1,
+  kcal: 680,
+  protein: 38,
+  carbs: 55,
+  fat: 32,
+  fiber: 8,
+  sugar: 6,
+  sodium: 580,
+  micros: [
+    { name: "Calcium", pct: 40 },
+    { name: "B12", pct: 50 },
+    { name: "Iron", pct: 25 },
+    { name: "Mg", pct: 28 },
+  ],
+  ingredients: [
+    { name: "Paneer, crumbled", qty: "150 g", p: 30, c: 4, f: 18, k: 290 },
+    { name: "Whole-wheat paratha", qty: "2 medium", p: 7, c: 40, f: 10, k: 320 },
+    { name: "Onion, capsicum, tomato", qty: "100 g", p: 2, c: 8, f: 0, k: 40 },
+    { name: "Oil + masala", qty: "5 g + spices", p: 0, c: 1, f: 5, k: 50 },
+  ],
+  method: [
+    "Heat oil; saute onion till translucent, add capsicum then tomato.",
+    "Toss in crumbled paneer with salt, turmeric, garam masala, and chili powder; cook 3 min.",
+    "Finish with chopped cilantro and a squeeze of lemon.",
+    "Cook parathas on a hot tawa with a thin smear of ghee until golden on both sides.",
+  ],
+};
+
+recipes.egg_bhurji_toast = {
+  id: "egg_bhurji_toast",
+  diet: "eggetarian",
+  cuisine: "indian",
+  regions: ["IN", "PK", "BD", "*"],
+  meal: "Breakfast",
+  time: "07:30",
+  title: "Egg Bhurji & Toast",
+  prepMin: 5,
+  cookMin: 8,
+  servings: 1,
+  kcal: 520,
+  protein: 32,
+  carbs: 40,
+  fat: 24,
+  fiber: 5,
+  sugar: 4,
+  sodium: 620,
+  micros: [
+    { name: "B12", pct: 90 },
+    { name: "Choline", pct: 60 },
+    { name: "Iron", pct: 18 },
+  ],
+  ingredients: [
+    { name: "Whole eggs", qty: "3 large", p: 18, c: 1, f: 15, k: 215 },
+    { name: "Onion, tomato, green chili", qty: "80 g", p: 2, c: 8, f: 0, k: 40 },
+    { name: "Whole-wheat toast", qty: "2 slices", p: 8, c: 30, f: 4, k: 200 },
+    { name: "Butter + masala", qty: "5 g + spices", p: 0, c: 1, f: 5, k: 60 },
+  ],
+  method: [
+    "Heat butter; saute onion, chili, tomato until soft.",
+    "Beat eggs lightly; pour over and stir continuously for soft scrambled texture.",
+    "Season with salt, turmeric, garam masala; finish with cilantro.",
+    "Serve with toast brushed with a little ghee.",
+  ],
+};
+
+recipes.veg_thali = {
+  id: "veg_thali",
+  diet: "vegetarian",
+  cuisine: "indian",
+  regions: ["IN", "PK", "*"],
+  meal: "Lunch",
+  time: "13:30",
+  title: "Veg Thali (Dal · Sabzi · Roti · Rice · Curd)",
+  prepMin: 15,
+  cookMin: 25,
+  servings: 1,
+  kcal: 760,
+  protein: 28,
+  carbs: 115,
+  fat: 22,
+  fiber: 14,
+  sugar: 8,
+  sodium: 640,
+  micros: [
+    { name: "Iron", pct: 35 },
+    { name: "Calcium", pct: 30 },
+    { name: "Fiber", pct: 60 },
+    { name: "Folate", pct: 50 },
+  ],
+  ingredients: [
+    { name: "Dal", qty: "150 ml", p: 8, c: 20, f: 3, k: 140 },
+    { name: "Sabzi (mixed veg with paneer cubes)", qty: "150 g", p: 8, c: 12, f: 8, k: 160 },
+    { name: "Whole-wheat roti", qty: "2", p: 6, c: 30, f: 4, k: 200 },
+    { name: "Steamed rice", qty: "100 g", p: 2, c: 28, f: 0, k: 130 },
+    { name: "Curd (yogurt)", qty: "100 g", p: 4, c: 4, f: 4, k: 80 },
+    { name: "Pickle + salad", qty: "20 g", p: 0, c: 2, f: 0, k: 10 },
+  ],
+  method: [
+    "Reheat or prepare dal as in dal_rice recipe.",
+    "Saute mixed vegetables (cauliflower, beans, peas, carrots) with paneer cubes, masala, until tender-crisp.",
+    "Cook rotis on the tawa; steam rice (about 1/3 cup uncooked).",
+    "Plate thali style: small bowls of dal and sabzi, rotis stacked, rice mound, curd, pickle, salad.",
+  ],
+};
+
 export function getRecipe(id: string): Recipe {
-  return recipes[id] ?? recipes.breakfast;
+  const r = recipes[id] ?? recipes.breakfast;
+  return {
+    diet: "vegetarian",
+    cuisine: "global",
+    regions: ["*"],
+    ...r,
+  };
 }
 
 export const recipeIds = Object.keys(recipes);
+
+export function recipeList(): Recipe[] {
+  return Object.keys(recipes).map((id) => getRecipe(id));
+}

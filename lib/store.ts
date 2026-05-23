@@ -6,6 +6,7 @@ import {
   reminders as defaultReminders,
   workout as defaultWorkout,
 } from "./mockData";
+import type { DietId } from "./regions";
 
 export type Profile = {
   sex: "male" | "female";
@@ -61,6 +62,8 @@ export type Settings = {
 export type Account = {
   username: string;
   displayName: string;
+  country: string; // ISO code
+  diet: DietId;
   createdAt: number;
 };
 
@@ -276,11 +279,23 @@ export const actions = {
   setTheme(theme: ThemeId) {
     update((s) => ({ ...s, settings: { ...s.settings, theme } }));
   },
-  signUp(username: string, displayName: string) {
+  signUp(username: string, displayName: string, country: string, diet: DietId) {
     update((s) => ({
       ...s,
-      account: { username: username.trim(), displayName: displayName.trim() || username.trim(), createdAt: Date.now() },
+      account: {
+        username: username.trim(),
+        displayName: displayName.trim() || username.trim(),
+        country,
+        diet,
+        createdAt: Date.now(),
+      },
     }));
+  },
+  setCountry(country: string) {
+    update((s) => (s.account ? { ...s, account: { ...s.account, country } } : s));
+  },
+  setDiet(diet: DietId) {
+    update((s) => (s.account ? { ...s, account: { ...s.account, diet } } : s));
   },
   logOut() {
     update((s) => ({ ...s, account: null }));
