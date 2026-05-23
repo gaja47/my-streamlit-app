@@ -1,44 +1,67 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter, useParams } from "next/navigation";
 import Header from "@/components/Header";
-import { mealDetail } from "@/lib/mockData";
+import { getRecipe } from "@/lib/recipes";
+import { actions, useHydrate, useStore } from "@/lib/store";
 
 export default function MealDetail() {
+  useHydrate();
+  const router = useRouter();
+  const params = useParams<{ id: string }>();
+  const id = params?.id ?? "breakfast";
+  const m = getRecipe(id);
+
+  const stored = useStore((s) => s.today.meals.find((x) => x.id === id));
   const [servings, setServings] = useState(1);
-  const m = mealDetail;
-  const scale = (n: number) => Math.round(n * servings);
+
+  useEffect(() => {
+    if (stored) setServings(stored.servings);
+  }, [stored?.servings]);
+
+  const scale = (n: number) => Math.round(n * servings * 10) / 10;
+  const scaleInt = (n: number) => Math.round(n * servings);
+  const logged = stored?.loggedAt !== null && stored?.loggedAt !== undefined;
+
+  function logServing() {
+    actions.setMealServings(id, servings);
+    if (!logged) actions.toggleMealLogged(id);
+    router.push("/meals");
+  }
 
   return (
     <div>
-      <Header title={m.title} subtitle={`${m.meal} · ${m.time}`} back="/meals" />
+      <Header title={m.title} subtitle={`${m.meal} - ${m.time}${logged ? " - logged" : ""}`} back="/meals" />
 
       <div className="px-5 mt-2">
         <div className="card p-5">
           <div className="flex items-end justify-between">
             <div>
-              <div className="text-[10px] uppercase tracking-[0.25em] text-bone-mute">Per serving</div>
+              <div className="text-[10px] uppercase tracking-[0.25em] text-bone-mute">
+                {servings === 1 ? "Per serving" : `x ${servings} servings`}
+              </div>
               <div className="text-[48px] font-light tracking-tightest tabular leading-none mt-2">
-                {scale(m.kcal)}
+                {scaleInt(m.kcal)}
               </div>
               <div className="text-[12px] text-bone-mute">kcal</div>
             </div>
             <div className="flex items-center gap-3 bg-ink-200 rounded-full p-1">
-              <button onClick={() => setServings((s) => Math.max(0.5, s - 0.5))} className="w-9 h-9 rounded-full bg-ink-100 text-bone">−</button>
+              <button onClick={() => setServings((s) => Math.max(0.5, +(s - 0.5).toFixed(1)))} className="w-9 h-9 rounded-full bg-ink-100 text-bone">-</button>
               <div className="tabular text-[14px] w-12 text-center">{servings} <span className="text-bone-mute">srv</span></div>
-              <button onClick={() => setServings((s) => Math.min(8, s + 0.5))} className="w-9 h-9 rounded-full bg-bone text-ink">+</button>
+              <button onClick={() => setServings((s) => Math.min(8, +(s + 0.5).toFixed(1)))} className="w-9 h-9 rounded-full bg-bone text-ink">+</button>
             </div>
           </div>
 
           <div className="mt-5 space-y-3">
-            <MacroBar label="Protein" v={scale(m.protein)} unit="g" color="#95c9a6" pct={(m.protein * 4) / m.kcal * 100} kcal={scale(m.protein * 4)} />
-            <MacroBar label="Carbs" v={scale(m.carbs)} unit="g" color="#e0a589" pct={(m.carbs * 4) / m.kcal * 100} kcal={scale(m.carbs * 4)} />
-            <MacroBar label="Fat" v={scale(m.fat)} unit="g" color="#c98ba8" pct={(m.fat * 9) / m.kcal * 100} kcal={scale(m.fat * 9)} />
+            <MacroBar label="Protein" v={scaleInt(m.protein)} unit="g" color="#95c9a6" pct={(m.protein * 4) / m.kcal * 100} kcal={scaleInt(m.protein * 4)} />
+            <MacroBar label="Carbs" v={scaleInt(m.carbs)} unit="g" color="#e0a589" pct={(m.carbs * 4) / m.kcal * 100} kcal={scaleInt(m.carbs * 4)} />
+            <MacroBar label="Fat" v={scaleInt(m.fat)} unit="g" color="#c98ba8" pct={(m.fat * 9) / m.kcal * 100} kcal={scaleInt(m.fat * 9)} />
           </div>
 
           <div className="grid grid-cols-3 gap-3 mt-5 pt-5 border-t border-ink-300/60 text-[11px]">
-            <Mini label="Fiber" v={scale(m.fiber)} unit="g" />
-            <Mini label="Sugar" v={scale(m.sugar)} unit="g" />
-            <Mini label="Sodium" v={scale(m.sodium)} unit="mg" />
+            <Mini label="Fiber" v={scaleInt(m.fiber)} unit="g" />
+            <Mini label="Sugar" v={scaleInt(m.sugar)} unit="g" />
+            <Mini label="Sodium" v={scaleInt(m.sodium)} unit="mg" />
           </div>
 
           <div className="mt-5">
@@ -51,6 +74,11 @@ export default function MealDetail() {
                 </span>
               ))}
             </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 mt-5 pt-5 border-t border-ink-300/60 text-[11px]">
+            <Mini label="Prep" v={m.prepMin} unit="min" />
+            <Mini label="Cook" v={m.cookMin} unit="min" />
           </div>
         </div>
       </div>
@@ -66,8 +94,8 @@ export default function MealDetail() {
                   <div className="text-[11px] text-bone-mute">{ing.qty}</div>
                 </div>
                 <div className="flex gap-3 text-[11px] tabular text-bone-mute">
-                  <span>P{scale(ing.p)}</span><span>C{scale(ing.c)}</span><span>F{scale(ing.f)}</span>
-                  <span className="text-bone tabular">{scale(ing.k)}</span>
+                  <span>P{scaleInt(ing.p)}</span><span>C{scaleInt(ing.c)}</span><span>F{scaleInt(ing.f)}</span>
+                  <span className="text-bone tabular">{scaleInt(ing.k)}</span>
                 </div>
               </div>
             ))}
@@ -90,8 +118,15 @@ export default function MealDetail() {
       </div>
 
       <div className="px-5 mt-4 grid grid-cols-2 gap-3">
-        <button className="rounded-2xl bg-ink-100 border border-ink-300/60 py-3 text-[13px]">Add reminder</button>
-        <button className="rounded-2xl bg-bone text-ink py-3 text-[13px] font-medium">Log this serving</button>
+        <button
+          onClick={() => { if (logged) actions.toggleMealLogged(id); router.push("/meals"); }}
+          className="rounded-2xl bg-ink-100 border border-ink-300/60 py-3 text-[13px]"
+        >
+          {logged ? "Unlog" : "Cancel"}
+        </button>
+        <button onClick={logServing} className="rounded-2xl bg-bone text-ink py-3 text-[13px] font-medium">
+          {logged ? "Update servings" : "Log this serving"}
+        </button>
       </div>
     </div>
   );
@@ -108,7 +143,7 @@ function MacroBar({ label, v, unit, color, pct, kcal }: { label: string; v: numb
         <div className="tabular">
           <span className="text-[15px] font-light">{v}</span>
           <span className="text-bone-mute ml-1 text-[11px]">{unit}</span>
-          <span className="text-bone-mute ml-3 text-[11px]">{Math.round(pct)}% · {kcal} kcal</span>
+          <span className="text-bone-mute ml-3 text-[11px]">{Math.round(pct)}% - {kcal} kcal</span>
         </div>
       </div>
       <div className="mt-2 h-1.5 rounded-full bg-ink-300/60 overflow-hidden">
