@@ -55,10 +55,12 @@ export default function Recipes() {
           <Link key={r.id} href={`/meals/${r.id}`} className="block subcard p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="flex-1 min-w-0">
-                <div className="text-[10px] uppercase tracking-[0.2em]" style={{ color: "var(--text-mute)" }}>{r.cuisine} · {r.meal}</div>
+                <div className="text-[10px] uppercase tracking-[0.2em]" style={{ color: "var(--text-mute)" }}>
+                  {r.cuisine && r.cuisine !== "global" ? `${r.cuisine} · ` : ""}{r.meal}
+                </div>
                 <div className="text-[15px] mt-1">{r.title}</div>
                 <div className="text-[11px] mt-1" style={{ color: "var(--text-mute)" }}>
-                  {r.diet} · {r.regions?.includes("*") ? "Global" : r.regions?.join(", ")}
+                  {r.diet}
                 </div>
               </div>
               <div className="text-right tabular">

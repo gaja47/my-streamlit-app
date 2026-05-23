@@ -18,7 +18,7 @@ export default function Meals() {
 
   return (
     <div>
-      <Header title="Eat" subtitle={new Date().toDateString()} />
+      <Header title="Meals" subtitle={new Date().toDateString()} />
 
       <div className="px-5 mt-2">
         <div className="card p-5">
