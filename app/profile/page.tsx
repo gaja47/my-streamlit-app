@@ -4,10 +4,10 @@ import Link from "next/link";
 import Header from "@/components/Header";
 import { actions, reset, useHydrate, useStore, type ThemeId } from "@/lib/store";
 
-const THEMES: { id: ThemeId; name: string; desc: string; preview: string[] }[] = [
-  { id: "noir", name: "Noir", desc: "Minimal dark, sage accents", preview: ["#0a0a0c", "#131316", "#95c9a6"] },
-  { id: "snow", name: "Snow", desc: "Clean light, warm accents", preview: ["#f7f6f1", "#ffffff", "#4f9d70"] },
-  { id: "violet", name: "Violet", desc: "Deep night with violet glow", preview: ["#0d0820", "#16102e", "#a896f5"] },
+const THEMES: { id: ThemeId; name: string; desc: string }[] = [
+  { id: "noir", name: "Noir", desc: "Minimal dark, sage accents" },
+  { id: "snow", name: "Snow", desc: "Clean light, warm accents" },
+  { id: "violet", name: "Violet", desc: "Deep night, violet glow" },
 ];
 
 export default function Profile() {
@@ -54,31 +54,28 @@ export default function Profile() {
       </div>
 
       <div className="px-5 mt-4">
-        <div className="card p-5">
-          <div className="text-[10px] uppercase tracking-[0.25em] mb-3" style={{ color: "var(--text-mute)" }}>Theme</div>
-          <div className="grid grid-cols-3 gap-2">
-            {THEMES.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => actions.setTheme(t.id)}
-                className={`rounded-2xl border p-3 text-left ${theme === t.id ? "ring-2" : ""}`}
-                style={{
-                  background: "var(--surface-2)",
-                  borderColor: "var(--border)",
-                  boxShadow: theme === t.id ? "inset 0 0 0 1px var(--text)" : undefined,
-                }}
-              >
-                <div className="flex gap-1 mb-2">
-                  {t.preview.map((c, i) => (
-                    <span key={i} className="w-4 h-4 rounded" style={{ background: c }} />
-                  ))}
-                </div>
-                <div className="text-[12px]">{t.name}</div>
-                <div className="text-[10px] mt-0.5" style={{ color: "var(--text-mute)" }}>{t.desc}</div>
-              </button>
-            ))}
+        <button
+          onClick={() => {
+            const i = THEMES.findIndex((t) => t.id === theme);
+            const next = THEMES[(i + 1) % THEMES.length];
+            actions.setTheme(next.id);
+          }}
+          className="w-full card p-5 flex items-center justify-between text-left"
+        >
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.25em]" style={{ color: "var(--text-mute)" }}>Theme</div>
+            <div className="text-[18px] mt-1">{THEMES.find((t) => t.id === theme)?.name ?? "Noir"}</div>
+            <div className="text-[11px] mt-0.5" style={{ color: "var(--text-mute)" }}>
+              {THEMES.find((t) => t.id === theme)?.desc} · tap to switch
+            </div>
           </div>
-        </div>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--text-mute)" }}>
+            <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+            <path d="M21 3v5h-5" />
+            <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+            <path d="M3 21v-5h5" />
+          </svg>
+        </button>
       </div>
 
       <div className="px-5 mt-4">
