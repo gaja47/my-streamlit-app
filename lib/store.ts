@@ -50,14 +50,26 @@ export type WorkoutEntry = {
 
 export type Reminder = { time: string; title: string; note: string; on: boolean };
 
+export type ThemeId = "noir" | "snow" | "violet";
+
 export type Settings = {
   channels: { push: boolean; telegram: boolean; email: boolean };
   leadMin: number;
+  theme: ThemeId;
+};
+
+export type Account = {
+  username: string;
+  displayName: string;
+  createdAt: number;
 };
 
 export type AppState = {
+  account: Account | null;
   profile: Profile | null;
   targets: Targets;
+  selectedProgramId: string | null;
+  selectedPlanId: string | null;
   today: { date: string; meals: LoggedMeal[]; waterMl: number };
   workout: WorkoutEntry;
   reminders: Reminder[];
@@ -71,8 +83,11 @@ function today(): string {
 }
 
 const defaultState: AppState = {
+  account: null,
   profile: null,
   targets: { calories: 2720, protein: 168, carbs: 306, fat: 76 },
+  selectedProgramId: null,
+  selectedPlanId: null,
   today: {
     date: today(),
     meals: defaultMeals.map((m) => ({
@@ -93,7 +108,7 @@ const defaultState: AppState = {
     })),
   },
   reminders: defaultReminders.map((r) => ({ time: r.time, title: r.title, note: r.note, on: r.on })),
-  settings: { channels: { push: true, telegram: true, email: false }, leadMin: 10 },
+  settings: { channels: { push: true, telegram: true, email: false }, leadMin: 10, theme: "noir" },
 };
 
 let state: AppState = defaultState;
@@ -257,5 +272,23 @@ export const actions = {
       ...s,
       settings: { ...s.settings, channels: { ...s.settings.channels, [channel]: on } },
     }));
+  },
+  setTheme(theme: ThemeId) {
+    update((s) => ({ ...s, settings: { ...s.settings, theme } }));
+  },
+  signUp(username: string, displayName: string) {
+    update((s) => ({
+      ...s,
+      account: { username: username.trim(), displayName: displayName.trim() || username.trim(), createdAt: Date.now() },
+    }));
+  },
+  logOut() {
+    update((s) => ({ ...s, account: null }));
+  },
+  setSelectedProgram(id: string | null) {
+    update((s) => ({ ...s, selectedProgramId: id }));
+  },
+  setSelectedPlan(id: string | null) {
+    update((s) => ({ ...s, selectedPlanId: id }));
   },
 };

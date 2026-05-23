@@ -9,6 +9,7 @@ import { totals, useHydrate, useStore } from "@/lib/store";
 
 export default function Home() {
   useHydrate();
+  const account = useStore((s) => s.account);
   const profile = useStore((s) => s.profile);
   const targets = useStore((s) => s.targets);
   const meals = useStore((s) => s.today.meals);
@@ -37,7 +38,7 @@ export default function Home() {
   return (
     <div>
       <Header
-        title={`${greeting}${profile ? "" : ", friend"}`}
+        title={`${greeting}${account?.displayName ? `, ${account.displayName}` : profile ? "" : ", friend"}`}
         subtitle={dateStr}
         right={
           <Link href="/reminders" className="w-10 h-10 rounded-full bg-ink-100 border border-ink-300/60 flex items-center justify-center">
