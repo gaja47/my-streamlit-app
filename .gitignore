@@ -1,4 +1,5 @@
 .gitattributes
+admin/
 node_modules
 .next
 out

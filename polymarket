@@ -1,0 +1,622 @@
+import streamlit as st
+
+st.set_page_config(page_title="Polymarket Bot", layout="wide")
+
+import json
+import os
+import time
+from datetime import datetime, timezone
+
+import requests
+
+# ---------- Admin folder helpers (mirrors `python` app) ----------
+ADMIN_DIR = "admin"
+USERS_FILE = os.path.join(ADMIN_DIR, "users.json")
+PM_CREDS_FILE = os.path.join(ADMIN_DIR, "polymarket_credentials.json")
+PM_SETTINGS_FILE = os.path.join(ADMIN_DIR, "polymarket_settings.json")
+PM_STRATEGIES_FILE = os.path.join(ADMIN_DIR, "polymarket_strategies.json")
+PM_TRADES_FILE = os.path.join(ADMIN_DIR, "polymarket_trades.json")
+
+GAMMA_API = "https://gamma-api.polymarket.com"
+DATA_API = "https://data-api.polymarket.com"
+CLOB_HOST = "https://clob.polymarket.com"
+POLYGON_CHAIN_ID = 137
+
+
+def load_json_file(path, default):
+    if os.path.exists(path):
+        with open(path, "r") as f:
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                return default
+    return default
+
+
+def save_json_file(path, data):
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+os.makedirs(ADMIN_DIR, exist_ok=True)
+
+if not os.path.exists(USERS_FILE):
+    save_json_file(USERS_FILE, ["MADMAX47"])
+if not os.path.exists(PM_CREDS_FILE):
+    save_json_file(PM_CREDS_FILE, {
+        "private_key": "",
+        "funder_address": "",
+        "signature_type": 0,
+        "api_key": "",
+        "api_secret": "",
+        "api_passphrase": "",
+    })
+if not os.path.exists(PM_SETTINGS_FILE):
+    # Conservative defaults — Paper mode, kill switch ON, small caps.
+    save_json_file(PM_SETTINGS_FILE, {
+        "trading_mode": "Paper",
+        "kill_switch": True,
+        "max_position_usd": 50.0,
+        "default_order_usd": 5.0,
+        "poll_interval_sec": 10,
+    })
+if not os.path.exists(PM_STRATEGIES_FILE):
+    save_json_file(PM_STRATEGIES_FILE, [])
+if not os.path.exists(PM_TRADES_FILE):
+    save_json_file(PM_TRADES_FILE, [])
+
+# ---------- Login (mirrors existing app's pattern) ----------
+all_users = load_json_file(USERS_FILE, [])
+if "logged_in_user" not in st.session_state:
+    st.session_state["logged_in_user"] = None
+
+if st.session_state["logged_in_user"] is None:
+    st.title("Polymarket Bot — Login")
+    username_in = st.text_input("Enter your username", "")
+    if st.button("Login"):
+        if username_in and username_in.lower() in [u.lower() for u in all_users]:
+            st.session_state["logged_in_user"] = username_in
+            st.rerun()
+        else:
+            st.error("Invalid username. Contact admin to be added to admin/users.json.")
+    st.stop()
+else:
+    username = st.session_state["logged_in_user"]
+
+# ---------- Load + hydrate session state ----------
+pm_creds = load_json_file(PM_CREDS_FILE, {})
+pm_settings = load_json_file(PM_SETTINGS_FILE, {})
+pm_strategies = load_json_file(PM_STRATEGIES_FILE, [])
+
+if "pm_creds" not in st.session_state:
+    st.session_state["pm_creds"] = pm_creds
+if "pm_settings" not in st.session_state:
+    st.session_state["pm_settings"] = pm_settings
+if "pm_strategies" not in st.session_state:
+    st.session_state["pm_strategies"] = pm_strategies
+if "pm_client" not in st.session_state:
+    st.session_state["pm_client"] = None
+if "pm_client_error" not in st.session_state:
+    st.session_state["pm_client_error"] = None
+for k in ("manual_token_id", "manual_outcome", "manual_question"):
+    if k not in st.session_state:
+        st.session_state[k] = ""
+
+# ---------- Optional deps (graceful) ----------
+try:
+    from py_clob_client.client import ClobClient
+    from py_clob_client.clob_types import ApiCreds, OrderArgs, OrderType
+    from py_clob_client.order_builder.constants import BUY, SELL
+    CLOB_AVAILABLE = True
+    CLOB_IMPORT_ERR = None
+except Exception as e:
+    CLOB_AVAILABLE = False
+    CLOB_IMPORT_ERR = repr(e)
+
+try:
+    from eth_account import Account
+    ETH_ACCOUNT_AVAILABLE = True
+except Exception:
+    ETH_ACCOUNT_AVAILABLE = False
+
+
+def build_clob_client(creds):
+    if not CLOB_AVAILABLE:
+        raise RuntimeError(f"py_clob_client not installed: {CLOB_IMPORT_ERR}")
+    private_key = (creds.get("private_key") or "").strip()
+    if not private_key:
+        raise RuntimeError("Private key not configured.")
+    funder = (creds.get("funder_address") or "").strip() or None
+    sig_type = int(creds.get("signature_type") or 0)
+    kwargs = {"key": private_key, "chain_id": POLYGON_CHAIN_ID}
+    if funder and sig_type:
+        kwargs["signature_type"] = sig_type
+        kwargs["funder"] = funder
+    client = ClobClient(CLOB_HOST, **kwargs)
+    api_key = (creds.get("api_key") or "").strip()
+    api_secret = (creds.get("api_secret") or "").strip()
+    api_pass = (creds.get("api_passphrase") or "").strip()
+    if api_key and api_secret and api_pass:
+        client.set_api_creds(ApiCreds(api_key=api_key, api_secret=api_secret, api_passphrase=api_pass))
+    else:
+        derived = client.create_or_derive_api_creds()
+        client.set_api_creds(derived)
+        creds["api_key"] = derived.api_key
+        creds["api_secret"] = derived.api_secret
+        creds["api_passphrase"] = derived.api_passphrase
+        save_json_file(PM_CREDS_FILE, creds)
+        st.session_state["pm_creds"] = creds
+    return client
+
+
+def get_client():
+    if st.session_state["pm_client"] is not None:
+        return st.session_state["pm_client"]
+    try:
+        c = build_clob_client(st.session_state["pm_creds"])
+        st.session_state["pm_client"] = c
+        st.session_state["pm_client_error"] = None
+        return c
+    except Exception as e:
+        st.session_state["pm_client_error"] = repr(e)
+        return None
+
+
+# ---------- Market data helpers ----------
+def gamma_search_markets(query, limit=20, active_only=True):
+    params = {"limit": 100 if query else limit, "closed": "false"}
+    if active_only:
+        params["active"] = "true"
+    try:
+        r = requests.get(f"{GAMMA_API}/markets", params=params, timeout=10)
+        r.raise_for_status()
+        markets = r.json()
+    except Exception as e:
+        return [], repr(e)
+    if query:
+        q = query.lower()
+        markets = [m for m in markets if q in (m.get("question") or "").lower()][:limit]
+    return markets, None
+
+
+def parse_json_field(val, default):
+    if val is None:
+        return default
+    if isinstance(val, (list, dict)):
+        return val
+    try:
+        return json.loads(val)
+    except Exception:
+        return default
+
+
+def get_token_midpoint(token_id):
+    try:
+        r = requests.get(f"{CLOB_HOST}/midpoint", params={"token_id": token_id}, timeout=5)
+        if r.ok:
+            return float(r.json().get("mid") or 0)
+    except Exception:
+        return None
+    return None
+
+
+def get_user_address(creds):
+    addr = (creds.get("funder_address") or "").strip()
+    if addr:
+        return addr
+    pk = (creds.get("private_key") or "").strip()
+    if not pk or not ETH_ACCOUNT_AVAILABLE:
+        return ""
+    try:
+        if not pk.startswith("0x"):
+            pk = "0x" + pk
+        return Account.from_key(pk).address
+    except Exception:
+        return ""
+
+
+def log_trade(entry):
+    entry = dict(entry)
+    entry.setdefault("ts", datetime.now(timezone.utc).isoformat())
+    trades = load_json_file(PM_TRADES_FILE, [])
+    trades.insert(0, entry)
+    trades = trades[:500]
+    save_json_file(PM_TRADES_FILE, trades)
+
+
+def place_order(token_id, side, price, size_shares, question=""):
+    """Returns (ok, message). Enforces kill switch, position cap, paper mode."""
+    settings = st.session_state["pm_settings"]
+    notional = float(price) * float(size_shares)
+    base = {
+        "token_id": str(token_id),
+        "side": side,
+        "price": float(price),
+        "size": float(size_shares),
+        "notional_usd": notional,
+        "question": question,
+    }
+    if settings.get("kill_switch", True):
+        log_trade({**base, "mode": "BLOCKED", "reason": "Kill switch ON"})
+        return False, "Kill switch is ON — no orders placed."
+    cap = float(settings.get("max_position_usd") or 0)
+    if cap > 0 and notional > cap:
+        log_trade({**base, "mode": "BLOCKED", "reason": f"notional > cap ${cap}"})
+        return False, f"Notional ${notional:.2f} exceeds cap ${cap:.2f}."
+    if settings.get("trading_mode", "Paper") == "Paper":
+        log_trade({**base, "mode": "PAPER"})
+        return True, f"PAPER order recorded: {side} {size_shares:.2f} @ {price}"
+    client = get_client()
+    if client is None:
+        log_trade({**base, "mode": "LIVE_FAILED", "error": st.session_state["pm_client_error"]})
+        return False, f"CLOB client not ready: {st.session_state['pm_client_error']}"
+    try:
+        oargs = OrderArgs(
+            price=float(price),
+            size=float(size_shares),
+            side=BUY if str(side).upper() == "BUY" else SELL,
+            token_id=str(token_id),
+        )
+        signed = client.create_order(oargs)
+        resp = client.post_order(signed, OrderType.GTC)
+        log_trade({**base, "mode": "LIVE", "response": str(resp)})
+        return True, f"LIVE order submitted: {resp}"
+    except Exception as e:
+        log_trade({**base, "mode": "LIVE_FAILED", "error": repr(e)})
+        return False, f"Order failed: {e}"
+
+
+# ---------- Header ----------
+s = st.session_state["pm_settings"]
+st.title("Polymarket Bot")
+st.markdown(
+    f"**User:** `{username}`  •  **Mode:** `{s.get('trading_mode')}`  •  "
+    f"**Kill switch:** `{'ON' if s.get('kill_switch') else 'OFF'}`  •  "
+    f"**Cap:** `${s.get('max_position_usd')}`"
+)
+
+if not CLOB_AVAILABLE:
+    st.warning(
+        "`py-clob-client` is not installed — live trading is disabled. "
+        "Install with `pip install py-clob-client eth-account`."
+    )
+
+tabs = st.tabs(["Markets", "Manual Trade", "Auto-Strategies", "Positions", "Trade Log", "Settings"])
+
+# === Markets ===
+with tabs[0]:
+    st.header("Browse Markets")
+    c1, c2, c3, c4 = st.columns([3, 1, 1, 1])
+    with c1:
+        query = st.text_input("Search question text", "")
+    with c2:
+        limit = st.number_input("Limit", 1, 100, 20)
+    with c3:
+        active_only = st.checkbox("Active only", value=True)
+    with c4:
+        refresh = st.button("Refresh")
+    if refresh or "pm_markets_cache" not in st.session_state:
+        markets, err = gamma_search_markets(query, limit=int(limit), active_only=active_only)
+        if err:
+            st.error(f"Gamma API error: {err}")
+        st.session_state["pm_markets_cache"] = markets
+    markets = st.session_state.get("pm_markets_cache") or []
+    if not markets:
+        st.info("No markets returned. Try widening the search or unchecking Active only.")
+    else:
+        rows = []
+        for m in markets:
+            outcomes = parse_json_field(m.get("outcomes"), ["Yes", "No"])
+            prices = parse_json_field(m.get("outcomePrices"), [])
+            rows.append({
+                "Question": (m.get("question") or "")[:80],
+                "A": outcomes[0] if outcomes else "",
+                "Price A": prices[0] if len(prices) > 0 else "",
+                "B": outcomes[1] if len(outcomes) > 1 else "",
+                "Price B": prices[1] if len(prices) > 1 else "",
+                "Volume": m.get("volume"),
+                "End": (m.get("endDate") or "")[:10],
+            })
+        st.dataframe(rows, use_container_width=True)
+        labels = [f"{i}: {(m.get('question') or '')[:70]}" for i, m in enumerate(markets)]
+        idx = st.selectbox("Inspect a market", list(range(len(markets))), format_func=lambda i: labels[i])
+        sel = markets[idx]
+        outcomes = parse_json_field(sel.get("outcomes"), ["Yes", "No"])
+        token_ids = parse_json_field(sel.get("clobTokenIds"), [])
+        st.markdown(f"**{sel.get('question')}**")
+        st.json({
+            "slug": sel.get("slug"),
+            "endDate": sel.get("endDate"),
+            "liquidity": sel.get("liquidity"),
+            "volume": sel.get("volume"),
+            "conditionId": sel.get("conditionId"),
+        })
+        for i, oc in enumerate(outcomes):
+            if i >= len(token_ids):
+                break
+            tid = str(token_ids[i])
+            mid = get_token_midpoint(tid)
+            cc1, cc2, cc3 = st.columns([3, 2, 2])
+            cc1.write(f"**{oc}**  •  token `{tid[:14]}…`")
+            cc2.metric("Midpoint", f"{mid:.4f}" if mid is not None else "—")
+            if cc3.button(f"Use {oc} →", key=f"use_{idx}_{i}"):
+                st.session_state["manual_token_id"] = tid
+                st.session_state["manual_outcome"] = oc
+                st.session_state["manual_question"] = sel.get("question") or ""
+                st.success(f"Loaded {oc} into Manual Trade / Auto-Strategy forms.")
+
+# === Manual Trade ===
+with tabs[1]:
+    st.header("Manual Order")
+    settings = st.session_state["pm_settings"]
+    st.caption(
+        f"Mode: **{settings.get('trading_mode')}** • "
+        f"Kill switch: **{'ON' if settings.get('kill_switch') else 'OFF'}** • "
+        f"Cap: **${settings.get('max_position_usd')}**"
+    )
+    with st.form("manual_trade_form"):
+        token_id = st.text_input("Token ID", value=st.session_state["manual_token_id"])
+        outcome_label = st.text_input("Outcome (log only)", value=st.session_state["manual_outcome"])
+        question = st.text_input("Question (log only)", value=st.session_state["manual_question"])
+        cc1, cc2, cc3 = st.columns(3)
+        with cc1:
+            side = st.selectbox("Side", ["BUY", "SELL"])
+        with cc2:
+            price = st.number_input("Limit price (0–1)", 0.001, 0.999, 0.50, 0.01, format="%.3f")
+        with cc3:
+            size_mode = st.selectbox("Size by", ["Shares", "USD notional"])
+        if size_mode == "Shares":
+            size_shares = st.number_input("Shares", 1.0, 1e6, 10.0, 1.0)
+        else:
+            usd = st.number_input("USD notional", 0.1, 1e6, float(settings.get("default_order_usd", 5.0)), 0.1)
+            size_shares = usd / max(price, 1e-6)
+            st.caption(f"= {size_shares:.2f} shares")
+        confirm = st.checkbox("I confirm this order")
+        submit = st.form_submit_button("Place Order")
+        if submit:
+            if not token_id.strip():
+                st.error("Token ID required.")
+            elif not confirm:
+                st.error("Tick the confirm box.")
+            else:
+                ok, msg = place_order(token_id.strip(), side, price, size_shares, question=question)
+                (st.success if ok else st.error)(msg)
+
+# === Auto-Strategies ===
+with tabs[2]:
+    st.header("Auto-Strategies")
+    st.caption(
+        "Each strategy polls the token midpoint. When the trigger fires it places one order "
+        "and disables itself (reset manually to re-arm). All safety rules still apply."
+    )
+    strategies = st.session_state["pm_strategies"]
+
+    with st.expander("Add strategy", expanded=False):
+        with st.form("add_strategy_form"):
+            name = st.text_input("Strategy name", value=f"strat-{len(strategies) + 1}")
+            token_id = st.text_input("Token ID", value=st.session_state["manual_token_id"])
+            question = st.text_input("Question (log only)", value=st.session_state["manual_question"])
+            ac1, ac2, ac3, ac4 = st.columns(4)
+            with ac1:
+                a_side = st.selectbox("Side", ["BUY", "SELL"], key="strat_side")
+            with ac2:
+                a_trigger = st.selectbox("Trigger when px", ["<=", ">="], key="strat_trigger")
+            with ac3:
+                a_thr = st.number_input("Threshold", 0.001, 0.999, 0.30, 0.01, format="%.3f")
+            with ac4:
+                a_order_price = st.number_input("Order price", 0.001, 0.999, 0.30, 0.01, format="%.3f")
+            a_size_usd = st.number_input(
+                "Order size (USD notional)", 0.1, 1e6,
+                float(st.session_state["pm_settings"].get("default_order_usd", 5.0)), 0.1,
+            )
+            add = st.form_submit_button("Add strategy")
+            if add:
+                if not token_id.strip():
+                    st.error("Token ID required.")
+                else:
+                    strategies.append({
+                        "name": name,
+                        "token_id": token_id.strip(),
+                        "question": question,
+                        "side": a_side,
+                        "trigger": a_trigger,
+                        "threshold": float(a_thr),
+                        "order_price": float(a_order_price),
+                        "size_usd": float(a_size_usd),
+                        "enabled": True,
+                        "fired": False,
+                        "last_price": None,
+                        "last_check": None,
+                        "last_message": "",
+                    })
+                    save_json_file(PM_STRATEGIES_FILE, strategies)
+                    st.session_state["pm_strategies"] = strategies
+                    st.success("Strategy added.")
+
+    if strategies:
+        for i, sdef in enumerate(list(strategies)):
+            with st.container(border=True):
+                c1, c2, c3, c4 = st.columns([2, 3, 3, 2])
+                c1.write(f"**{sdef['name']}**")
+                c2.write((sdef.get("question") or "")[:60])
+                c3.write(
+                    f"{sdef['side']} @ {sdef['order_price']}  •  "
+                    f"trigger px {sdef['trigger']} {sdef['threshold']}  •  ${sdef['size_usd']}"
+                )
+                lp = sdef.get("last_price")
+                lp_txt = f"{lp:.4f}" if isinstance(lp, (int, float)) else "—"
+                c4.write(
+                    f"on: {sdef['enabled']}  fired: {sdef['fired']}  px {lp_txt}"
+                )
+                bc1, bc2, bc3 = st.columns(3)
+                if bc1.button("Toggle enabled", key=f"toggle_{i}"):
+                    strategies[i]["enabled"] = not strategies[i]["enabled"]
+                    save_json_file(PM_STRATEGIES_FILE, strategies)
+                    st.rerun()
+                if bc2.button("Reset fired", key=f"reset_{i}"):
+                    strategies[i]["fired"] = False
+                    save_json_file(PM_STRATEGIES_FILE, strategies)
+                    st.rerun()
+                if bc3.button("Delete", key=f"del_{i}"):
+                    strategies.pop(i)
+                    save_json_file(PM_STRATEGIES_FILE, strategies)
+                    st.rerun()
+
+    st.divider()
+    pc1, pc2 = st.columns([1, 3])
+    with pc1:
+        poll = st.checkbox("Run poll loop", value=False, help="Blocks the Streamlit thread between polls.")
+    with pc2:
+        interval = st.slider(
+            "Poll interval (sec)", 5, 120,
+            int(st.session_state["pm_settings"].get("poll_interval_sec", 10)),
+        )
+    if poll:
+        changed = False
+        for i, sdef in enumerate(strategies):
+            if not sdef.get("enabled") or sdef.get("fired"):
+                continue
+            px = get_token_midpoint(sdef["token_id"])
+            strategies[i]["last_price"] = px
+            strategies[i]["last_check"] = datetime.now(timezone.utc).isoformat()
+            changed = True
+            if px is None:
+                continue
+            t = sdef["trigger"]
+            thr = sdef["threshold"]
+            hit = (t == "<=" and px <= thr) or (t == ">=" and px >= thr)
+            if hit:
+                shares = sdef["size_usd"] / max(sdef["order_price"], 1e-6)
+                ok, msg = place_order(
+                    sdef["token_id"], sdef["side"], sdef["order_price"], shares,
+                    question=sdef.get("question", ""),
+                )
+                strategies[i]["fired"] = True
+                strategies[i]["enabled"] = False
+                strategies[i]["last_message"] = msg
+        if changed:
+            save_json_file(PM_STRATEGIES_FILE, strategies)
+            st.session_state["pm_strategies"] = strategies
+        st.write(f"Last poll: {datetime.now(timezone.utc).isoformat()}")
+        time.sleep(interval)
+        st.rerun()
+
+# === Positions ===
+with tabs[3]:
+    st.header("Positions")
+    addr = get_user_address(st.session_state["pm_creds"])
+    if not addr:
+        st.info("Add a private key (or funder address) in Settings to view positions.")
+    else:
+        st.caption(f"Address: `{addr}`")
+        if st.button("Refresh positions") or "pm_positions_cache" not in st.session_state:
+            try:
+                r = requests.get(
+                    f"{DATA_API}/positions",
+                    params={"user": addr, "sizeThreshold": 0.1},
+                    timeout=10,
+                )
+                r.raise_for_status()
+                st.session_state["pm_positions_cache"] = r.json()
+            except Exception as e:
+                st.error(f"Position fetch failed: {e}")
+                st.session_state["pm_positions_cache"] = []
+        positions = st.session_state.get("pm_positions_cache") or []
+        if not positions:
+            st.info("No positions.")
+        else:
+            st.dataframe(positions, use_container_width=True)
+
+# === Trade Log ===
+with tabs[4]:
+    st.header("Trade Log")
+    trades = load_json_file(PM_TRADES_FILE, [])
+    if not trades:
+        st.info("No trades yet.")
+    else:
+        st.dataframe(trades, use_container_width=True)
+        if st.button("Clear log"):
+            save_json_file(PM_TRADES_FILE, [])
+            st.rerun()
+
+# === Settings ===
+with tabs[5]:
+    st.header("Settings")
+
+    st.subheader("Safety")
+    cur = st.session_state["pm_settings"]
+    with st.form("safety_form"):
+        mode = st.selectbox(
+            "Trading mode", ["Paper", "Live"],
+            index=0 if cur.get("trading_mode", "Paper") == "Paper" else 1,
+            help="Paper = simulated, logged but no real order. Live = real CLOB order.",
+        )
+        kill = st.checkbox("Kill switch (block all orders)", value=bool(cur.get("kill_switch", True)))
+        max_pos = st.number_input(
+            "Max per-order notional (USD)", 0.0, 1e9,
+            float(cur.get("max_position_usd", 50.0)), 1.0,
+        )
+        default_usd = st.number_input(
+            "Default order size (USD)", 0.0, 1e9,
+            float(cur.get("default_order_usd", 5.0)), 0.1,
+        )
+        poll = st.number_input(
+            "Strategy poll interval (sec)", 1, 3600,
+            int(cur.get("poll_interval_sec", 10)),
+        )
+        if st.form_submit_button("Save"):
+            st.session_state["pm_settings"] = {
+                "trading_mode": mode,
+                "kill_switch": kill,
+                "max_position_usd": float(max_pos),
+                "default_order_usd": float(default_usd),
+                "poll_interval_sec": int(poll),
+            }
+            save_json_file(PM_SETTINGS_FILE, st.session_state["pm_settings"])
+            st.success("Saved.")
+
+    st.subheader("Polymarket CLOB credentials")
+    st.caption(
+        "Stored in plaintext at `admin/polymarket_credentials.json`. Use a **dedicated** "
+        "trading wallet — never your main one. For Polymarket UI proxy wallets, set "
+        "Funder = your proxy address and Signature type = 2."
+    )
+    with st.form("creds_form"):
+        creds = st.session_state["pm_creds"]
+        pk = st.text_input("Private key", value=creds.get("private_key", ""), type="password")
+        funder = st.text_input("Funder address (proxy wallet, optional)", value=creds.get("funder_address", ""))
+        sig_type = st.selectbox(
+            "Signature type", [0, 1, 2],
+            index=[0, 1, 2].index(int(creds.get("signature_type") or 0)),
+            help="0 = EOA private key; 2 = Polymarket UI (proxy via funder).",
+        )
+        api_k = st.text_input("API key (auto-derived if blank)", value=creds.get("api_key", ""))
+        api_s = st.text_input("API secret", value=creds.get("api_secret", ""), type="password")
+        api_p = st.text_input("API passphrase", value=creds.get("api_passphrase", ""), type="password")
+        if st.form_submit_button("Save credentials"):
+            st.session_state["pm_creds"] = {
+                "private_key": pk.strip(),
+                "funder_address": funder.strip(),
+                "signature_type": int(sig_type),
+                "api_key": api_k.strip(),
+                "api_secret": api_s.strip(),
+                "api_passphrase": api_p.strip(),
+            }
+            save_json_file(PM_CREDS_FILE, st.session_state["pm_creds"])
+            st.session_state["pm_client"] = None
+            st.success("Saved. Click 'Test connection' to initialise CLOB.")
+
+    if st.button("Test connection"):
+        st.session_state["pm_client"] = None
+        c = get_client()
+        if c is None:
+            st.error(f"Connection failed: {st.session_state['pm_client_error']}")
+        else:
+            try:
+                ok = c.get_ok()
+                st.success(f"CLOB reachable: {ok}")
+            except Exception as e:
+                st.warning(f"Client built, but health check failed: {e}")
+            addr = get_user_address(st.session_state["pm_creds"])
+            if addr:
+                st.info(f"Address in use: {addr}")
