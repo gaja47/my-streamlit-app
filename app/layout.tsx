@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import BottomNav from "@/components/BottomNav";
+import AppShell from "@/components/AppShell";
 import ThemeProvider from "@/components/ThemeProvider";
 
 export const metadata: Metadata = {
@@ -26,10 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className="font-sans">
         <ThemeProvider />
-        <div className="mx-auto min-h-screen w-full max-w-[440px] shadow-[0_30px_120px_rgba(0,0,0,0.6)] sm:my-6 sm:rounded-[36px] sm:overflow-hidden sm:min-h-[860px] sm:border sm:border-[var(--border)]" style={{ background: "var(--bg)" }}>
-          <main className="pb-28">{children}</main>
-          <BottomNav />
-        </div>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

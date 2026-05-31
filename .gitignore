@@ -7,3 +7,6 @@ public/
 *.tsbuildinfo
 next-env.d.ts
 screenshots/
+__pycache__/
+*.pyc
+engine/data/
