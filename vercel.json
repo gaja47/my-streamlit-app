@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
   "buildCommand": "NEXT_OUTPUT_EXPORT=true npm run build && rm -rf public && mv out public && cp -r static/* public/ 2>/dev/null || true",
   "outputDirectory": "public",
   "installCommand": "npm install"
