@@ -1,0 +1,22 @@
+[Unit]
+Description=Order Flow Engine (Fyers depth -> WebSocket gateway)
+Documentation=https://github.com/gaja47/my-streamlit-app/blob/main/deploy/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=orderflow
+WorkingDirectory=/opt/orderflow-engine/engine
+EnvironmentFile=/opt/orderflow-engine/orderflow-engine.env
+ExecStart=/opt/orderflow-engine/venv/bin/python run.py
+Restart=on-failure
+RestartSec=5
+# hardening — the engine never needs to write outside its own dir
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+ReadWritePaths=/opt/orderflow-engine
+
+[Install]
+WantedBy=multi-user.target
