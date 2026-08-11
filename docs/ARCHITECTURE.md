@@ -25,7 +25,8 @@ downstream analytic upgrades to TRUE fidelity with no rewrite.
 
 1. ENGINE (Python) — ingest, decode, reconstruct book, analytics, persist
    - decoders/   protobuf decode of Versova packets
-   - analytics/  imbalance, absorption, CVD-proxy, footprint-proxy, heatmap matrix
+   - analytics/  imbalance, absorption, CVD-proxy, footprint-proxy, heatmap matrix,
+                 volume profile / POC / value area / HVN-LVN, VWAP + bands
    - storage/    Parquet (replay+backtest) and in-memory ring buffer (live)
 2. GATEWAY — your own WS server; fan-out to clients, enforce entitlements
    (keeps the raw Fyers feed server-side = redistribution control point)

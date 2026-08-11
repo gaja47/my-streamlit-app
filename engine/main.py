@@ -13,17 +13,23 @@ Requires: fyers-apiv3, pyarrow, protobuf
 """
 import os
 from order_book import OrderBook
-from analytics.signals import imbalance, CVDProxy, AbsorptionDetector
+from analytics.signals import (
+    imbalance, CVDProxy, AbsorptionDetector, VolumeProfile, VolumeTracker, VWAP,
+)
 from storage.recorder import DepthRecorder
 
 # from fyers_apiv3.FyersWebsocket import data_ws  # depth/LTP socket
 # Versova TBT endpoint: wss://rtsocket-api.fyers.in/versova
 
 SYMBOLS = os.environ.get("SYMBOLS", "NSE:NIFTY25JULFUT").split(",")
+TICK_SIZE = float(os.environ.get("TICK_SIZE", "0.05"))
 
 books = {s: OrderBook(s) for s in SYMBOLS}
 cvd = {s: CVDProxy() for s in SYMBOLS}
 absorb = {s: AbsorptionDetector() for s in SYMBOLS}
+volume = {s: VolumeTracker() for s in SYMBOLS}
+profile = {s: VolumeProfile(tick_size=TICK_SIZE) for s in SYMBOLS}
+vwap = {s: VWAP() for s in SYMBOLS}
 recorder = DepthRecorder(out_dir="data")
 
 
@@ -32,12 +38,19 @@ def decode_packet(raw_bytes):
     STUB: replace with Fyers Versova protobuf decode.
     Must return: (symbol, is_snapshot, bids[], asks[], ltp, ltq, ts)
     where bids/asks are [{'price':float,'qty':int,'orders':int}, ...]
+
+    Optionally return an 8th element, vtt (volume traded today, cumulative).
+    Fyers sends it on the same packet, and its per-packet delta is the true
+    traded volume — supplying it makes volume profile / POC / VWAP materially
+    more accurate than the LTQ fallback. See analytics.signals.VolumeTracker.
     """
     raise NotImplementedError("Plug in Fyers Versova protobuf schema here")
 
 
 def on_message(raw_bytes):
-    sym, is_snapshot, bids, asks, ltp, ltq, ts = decode_packet(raw_bytes)
+    packet = decode_packet(raw_bytes)
+    sym, is_snapshot, bids, asks, ltp, ltq, ts = packet[:7]
+    vtt = packet[7] if len(packet) > 7 else None
     bk = books[sym]
     if is_snapshot:
         bk.apply_snapshot(bids, asks, ts)
@@ -51,8 +64,14 @@ def on_message(raw_bytes):
     c = cvd[sym].update(ltp, ltq, bb, ba)
     imb = imbalance(bk)
     ab = absorb[sym].update(bk)
+
+    traded = volume[sym].increment(ltp, ltq, vtt)
+    profile[sym].update(ltp, traded)
+    vwap[sym].update(ltp, traded)
+
     top_bids, top_asks = bk.top(50)
-    recorder.record(sym, ts, top_bids, top_asks, c, imb, ab)
+    recorder.record(sym, ts, top_bids, top_asks, c, imb, ab,
+                    profile=profile[sym], vwap=vwap[sym])
 
 
 if __name__ == "__main__":

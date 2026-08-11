@@ -35,11 +35,11 @@ Quantower, ClusterDelta, NinjaTrader), mapped to what your **Fyers TBT
 
 | Tool | What it shows | Fyers fidelity | Status |
 |------|---------------|----------------|--------|
-| Volume Profile | Volume by price | 🟡 APPROX | Roadmap |
+| Volume Profile | Volume by price | 🟡 APPROX | DONE (engine) |
 | Market Profile / TPO | Time at price | ✅ EXACT** | Roadmap |
-| POC / DPOC | Highest-volume price | 🟡 APPROX | Roadmap |
-| VWAP + anchored + bands | Vol-weighted avg price | 🟡 APPROX | Roadmap |
-| HVN / LVN | High/low volume nodes | 🟡 APPROX | Roadmap |
+| POC / DPOC | Highest-volume price | 🟡 APPROX | DONE (engine) |
+| VWAP + anchored + bands | Vol-weighted avg price | 🟡 APPROX | DONE (engine) |
+| HVN / LVN | High/low volume nodes | 🟡 APPROX | DONE (engine) |
 
 **TPO is time-based not volume-based, so it's exact from periodic depth/price sampling.
 
@@ -59,6 +59,19 @@ numbers are real depth vs inferred.
 
 1. Heatmap + DOM + imbalance + absorption  ← all EXACT, all done in mockup
 2. Replay bridge (recorded Parquet → frontend)  ← validate edge on YOUR instruments
-3. Volume Profile + VWAP + POC  ← high trader demand, approx acceptable
+3. Volume Profile + VWAP + POC  ← DONE in `engine/analytics/signals.py`; still
+   needs a frontend panel, and the fidelity label must read APPROX
 4. Footprint (approx, clearly labelled)  ← only if subscribers ask
 5. Time & Sales / big-trades  ← wait for Fyers trade data
+
+### Why the volume tools are APPROX (and how they get better)
+
+Volume-by-price needs volume *at a price*. Fyers batches LTP/LTQ/VTT per depth
+packet, so a batch spanning several prices is booked entirely at its last traded
+price — the profile's *shape* is trustworthy, the per-bucket numbers are not.
+
+`VolumeTracker` takes the cumulative VTT when the decoder supplies it and uses
+its per-packet delta as the traded volume. That removes the double-counting that
+naive LTQ accumulation causes, leaving only the price-attribution error. Wire
+VTT through `decode_packet` (optional 8th tuple element) — it is strictly better
+than the LTQ fallback. These go fully EXACT the day Fyers ships trade prints.
