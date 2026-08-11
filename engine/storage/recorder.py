@@ -20,8 +20,18 @@ class DepthRecorder:
         self.buffer = []
         os.makedirs(out_dir, exist_ok=True)
 
-    def record(self, symbol, ts, bids, asks, cvd, imb, absorb):
-        """One row = one book state with its derived signals."""
+    def record(self, symbol, ts, bids, asks, cvd, imb, absorb,
+               profile=None, vwap=None):
+        """
+        One row = one book state with its derived signals.
+
+        `profile` (VolumeProfile) and `vwap` (VWAP) are optional; when passed,
+        their running summary is snapshotted per row, so a replay can show POC /
+        value-area / VWAP *migration* through the session rather than just the
+        end-of-day shape. Scalars only — the full histogram would bloat every
+        row, and it is recoverable by replaying the captured prints. Both are
+        APPROXIMATE — see analytics.signals.
+        """
         row = {
             "ts": ts,
             "symbol": symbol,
@@ -35,9 +45,30 @@ class DepthRecorder:
             "imb20": imb[2].ratio if len(imb) > 2 else None,
             "absorption": str(absorb) if absorb else "",
         }
+        row.update(self._profile_cols(profile))
+        row.update(self._vwap_cols(vwap))
         self.buffer.append(row)
         if len(self.buffer) >= self.flush_every:
             self.flush()
+
+    @staticmethod
+    def _profile_cols(profile):
+        """Fixed key set either way, so every row shares one Parquet schema."""
+        if profile is None:
+            return {"poc": None, "val": None, "vah": None, "profile_volume": None}
+        va = profile.value_area()
+        return {
+            "poc": profile.poc(),
+            "val": va[0] if va else None,
+            "vah": va[1] if va else None,
+            "profile_volume": profile.total_volume,
+        }
+
+    @staticmethod
+    def _vwap_cols(vwap):
+        if vwap is None:
+            return {"vwap": None, "vwap_sd": None}
+        return {"vwap": vwap.value, "vwap_sd": vwap.std_dev}
 
     def flush(self):
         if not self.buffer:
